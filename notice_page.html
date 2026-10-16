@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{TITLE}}</title>
+<style>
+  /* ★★ 全页字号跟着视口宽度缩放。
+     游戏内嵌 WebView 的 CSS 视口比它实际显示的区域大(实测约 1:0.6),
+     写死 px 会显得很小、而且换机器不通用 —— 用 vw 就自适应。
+     觉得整体偏大/偏小, 只改下面这一行的 2.4vw 即可。 */
+  html { font-size: 2.4vw; }
+
+  html, body {
+    margin: 0; padding: 0;
+    background: #f4f2ee; color: #1c1c1c;
+    font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif;
+    -webkit-text-size-adjust: 100%; text-size-adjust: 100%;
+  }
+  .wrap { max-width: 40rem; margin: 0 auto; padding: 2.2rem 2.6rem 6rem; }
+  h1 {
+    font-size: 1.6rem; margin: 0; color: #b8912f;
+    letter-spacing: .28rem; font-weight: 600;
+  }
+  .rule { height: .12rem; background: #c8a24a; opacity: .5; margin: .95rem 0 1.9rem; }
+  p { font-size: 1.08rem; line-height: 2.0; margin: 0 0 1.25rem; }
+  p:last-child { margin-bottom: 0; }
+
+  /* ---- 「活动切换」页 (id=1002) 用的按钮 ---- */
+  .swlist { margin: 1.6rem 0 1.6rem; }
+  .swbtn {
+    display: block; text-decoration: none; color: #1c1c1c;
+    background: #fff; border: .12rem solid #d9c98f;
+    border-radius: .7rem; padding: 1rem 1.3rem; margin: 0 0 1rem;
+    box-shadow: 0 .1rem .35rem rgba(0,0,0,.05);
+  }
+  .swbtn .nm { display: block; font-size: 1.18rem; font-weight: 600; }
+  .swbtn .ds { display: block; font-size: .92rem; color: #6d675c; margin-top: .35rem; line-height: 1.7; }
+  .swbtn.cur { border-color: #b8912f; background: #fdf8ea; }
+  .swbtn.back { display: inline-block; margin-top: 1.4rem; }
+  /* ---- 「退出登录」按钮: 实心红, 和返回按钮区分开 ---- */
+  .swbtn.quit {
+    display: inline-block; margin-top: 1.4rem;
+    background: #8a2b2b; color: #fff; border-color: #8a2b2b; font-weight: 600;
+  }
+  .swbtn.quit:hover { background: #a13434; border-color: #a13434; }
+  .hint { font-size: .98rem; color: #6d675c; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>{{TITLE}}</h1>
+    <div class="rule"></div>
+    {{BODY}}
+  </div>
+</body>
+</html>

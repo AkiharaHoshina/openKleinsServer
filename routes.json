@@ -1,0 +1,130 @@
+{
+ "__default__": {
+  "code": 0,
+  "msg": "ok",
+  "data": {}
+ },
+ "baseapi/v1/config": {
+  "code": 0,
+  "msg": "ok",
+  "data": {
+   "env": 2,
+   "envName": "release",
+   "accUri": "http://127.0.0.1:10300/acc",
+   "idcardUri": "http://127.0.0.1:10300/idcard",
+   "noticeUri": "http://127.0.0.1:10300/notice",
+   "noticeWebUri": "http://127.0.0.1:10300/noticeweb",
+   "serviceUri": "http://127.0.0.1:10300/service",
+   "exchangeUri": "http://127.0.0.1:10300/exchange",
+   "logUri": "http://127.0.0.1:10300/log",
+   "orderUri": "http://127.0.0.1:10300/order",
+   "partUri": "http://127.0.0.1:10300/part",
+   "gameServerUri": "[{\"serverId\": 1, \"serverName\": \"LocalServer\", \"ip\": \"127.0.0.1\", \"port\": 10301}]"
+  }
+ },
+ "baseapi/v1/update": {
+  "code": 0,
+  "msg": "ok",
+  "data": {
+   "updateType": "res",
+   "updateList": [],
+   "resUrl": "http://127.0.0.1:10300/res/",
+   "bin": ""
+  }
+ },
+ "baseapi/v1/getResVer": {
+  "code": 0,
+  "msg": "ok",
+  "data": {
+   "updateType": "res",
+   "updateList": [],
+   "resUrl": "http://127.0.0.1:10300/res/",
+   "bin": ""
+  }
+ },
+ "notice/api/notice/v1/getMaintainNotice": {
+  "code": 0,
+  "msg": "ok",
+  "data": {
+   "id": 0
+  }
+ },
+ "notice/api/notice/v1/getGeneralNotice": {
+  "code": 0,
+  "msg": "ok",
+  "data": [
+   {
+    "id": 1001,
+    "noticeId": 1001,
+    "title": "敬告",
+    "noticeTitle": "敬告",
+    "generalType": 1,
+    "type": 1,
+    "sort": 1,
+    "status": 1,
+    "startAt": "2026-10-15 00:00:00",
+    "startTime": "2026-10-15 00:00:00",
+    "endAt": "2035-01-01 00:00:00",
+    "endTime": "2035-01-01 00:00:00",
+    "content": "你现在正在游玩的是由 KleinsPatch 本地服务端驱动的单机版《环行旅舍》。本项目仅供协议逆向、游戏保存与技术交流研究。\n\n以及致所有妄图拿去开私服盈利的：\n\nKleinsPatch 在架构层面强制锁死了单客户端会话，且完全不具备多用户账户体系，所有道具与进度严格依赖本地存档。所以你大可断了这个念想。无论是出于尊重知识产权，还是出于对游戏本身的热爱——我操你妈。",
+    "url": "",
+    "order": 1
+   },
+   {
+    "id": 1002,
+    "noticeId": 1002,
+    "title": "活动切换",
+    "noticeTitle": "活动切换",
+    "generalType": 2,
+    "type": 1,
+    "sort": 2,
+    "status": 1,
+    "startAt": "2026-10-15 00:00:00",
+    "startTime": "2026-10-15 00:00:00",
+    "endAt": "2035-01-01 00:00:00",
+    "endTime": "2035-01-01 00:00:00",
+    "content": "点右侧可以切换当前启用的回合活动线路（三条线客户端同一时刻只认一条）。",
+    "url": "",
+    "order": 2
+   },
+   {
+    "id": 1003,
+    "noticeId": 1003,
+    "title": "游戏工具",
+    "noticeTitle": "游戏工具",
+    "generalType": 1,
+    "type": 1,
+    "sort": 3,
+    "order": 3,
+    "status": 1,
+    "startAt": "2026-10-15 00:00:00",
+    "startTime": "2026-10-15 00:00:00",
+    "endAt": "2035-01-01 00:00:00",
+    "endTime": "2035-01-01 00:00:00",
+    "content": "本地服务端的工具页：可以整份重置存档、只重置角色数据，也可以用「角色工具」给舍友发补充协议、或把某个舍友删掉。",
+    "url": ""
+   }
+  ]
+ },
+ "acc/api/acc/v1/login": {
+  "code": 0,
+  "msg": "ok",
+  "data": {
+   "userId": 10000001,
+   "token": "localtoken-0001",
+   "logOffTime": 0,
+   "isVirtual": 0
+  }
+ },
+ "idcard/api/idcard/v1/query": {
+  "code": 0,
+  "msg": "ok",
+  "data": {
+   "status": 0,
+   "age": 30,
+   "birthDay": "19940101",
+   "pi": "110101199401011234",
+   "idNum": "110101199401011234"
+  }
+ }
+}

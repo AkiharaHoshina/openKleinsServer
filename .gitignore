@@ -1,0 +1,54 @@
+# ── 构建产物 ────────────────────────────────────────────
+release/
+_build/
+*.exe
+*.pdb
+*.manifest
+
+# ── 运行期状态（跑一次游戏/服务端就会变，不该进版本控制）──
+# ★★ 2026-10-17: 这些东西**已经全都不在程序目录里了** —— 它们搬到
+#   %USERPROFILE%\Saved Games\freeKleins\（见 paths.py 的 migrate_legacy）。
+#   程序目录只剩「程序 + 只读的作者配置」，可以整包分发。
+#   下面这些条目留着是**历史兜底**：万一有人从旧目录跑起来，别把这些又提交进去。
+cfg/
+# ★ 资源更新下发：res\ 是「打过补丁的 Lua」+ 其原版副本（含游戏代码），
+#   res_update.json 是按当前部署生成的清单 —— 两者都由 tools\make_res_update.py 产出。
+#   ★★ 这条路**已经永久废弃**（见 fakeserver 里那段注释），别再启用。
+res/
+res_update.json
+routes.json.*.bak
+player.json
+player.json.bak*
+local_name.txt
+settings.json
+roles_index.json
+# ★ 下面两个 2026-10-17 才搬走的（以前在仓库根）：
+#   bizdata.json    = 从正式服抓回来的原始回包 -> 算游戏资产, 现在读 <用户数据>\resources\
+#   turn_activity.json = 当前回合活动线路(运行期状态) -> 现在读 <用户数据>\state\
+bizdata.json
+turn_activity.json
+*.log
+*.flag
+probe.log
+
+# ── ★ 游戏派生数据：一律不进仓库（见 NOTICE.md）─────────
+#   这些是从客户端提取/反编译出来的东西，属于游戏本体
+il2cpp_out/
+_evidence/
+*.orig
+*.assets
+*.resS
+*.dll
+GameAssembly*
+
+# ── Python ─────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+
+# ── 杂项 ───────────────────────────────────────────────
+*.tmp
+*.bak
+Thumbs.db
+desktop.ini
+_commit_msg.txt

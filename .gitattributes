@@ -1,0 +1,23 @@
+# ★ .bat 必须 CRLF —— 否则 cmd 会把行切碎（实测过）。
+#   .bat 同时是 GBK 编码（首行 `chcp 936 >nul`），git 不要动它的字节。
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+
+# 其余文本用 LF，省得跨平台 diff 噪音
+*.py    text eol=lf
+*.md    text eol=lf
+*.json  text eol=lf
+*.html  text eol=lf
+*.spec  text eol=lf
+*.ps1   text eol=crlf
+*.txt   text eol=lf
+
+# 二进制：禁止 git 做行尾转换 / 文本 diff
+*.exe   binary
+*.pdb   binary
+*.zip   binary
+*.png   binary
+*.jpg   binary
+
+# GitHub 别把这些算进语言统计
+docs/*.md linguist-documentation
