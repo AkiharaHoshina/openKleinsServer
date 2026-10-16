@@ -201,4 +201,8 @@ python tools\_verify_exe.py
 
 ## 许可
 
-代码 MIT，见 [LICENSE](LICENSE)。游戏相关内容见 [NOTICE.md](NOTICE.md)。
+代码 **AGPL-3.0**，见 [LICENSE](LICENSE)。游戏相关内容见 [NOTICE.md](NOTICE.md)。
+
+★ 该许可**只覆盖本仓库的原创源码**，不覆盖《环行旅舍》及其任何资源。
+★ AGPL 允许商用，但要求：改动必须以同样许可开源；
+  **通过网络提供服务时，也必须向使用者提供源码**。想拿去做私服赚钱，就得把全部改动公开。
