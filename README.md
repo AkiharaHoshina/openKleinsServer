@@ -7,7 +7,7 @@
 **《环行旅舍》本地假服务端** —— 让这款已停运的 Unity 手游在你的机器上重新跑起来。
 
 本仓库只包含**服务端程序与文档**。它**不含任何游戏素材、美术、音频或配置数据**，
-需要你自备一份合法客户端，并用 **[openKleinsPatcher](../openKleinsPatcher)** 打上补丁。
+需要你自备一份合法客户端，并用 **[openKleinsPatcher](https://github.com/AkiharaHoshina/openKleinsPatcher)** 打上补丁。
 
 > 《环行旅舍》(Kleins) 的一切权利归原权利人所有。本项目出于**互操作性研究 / 数字保存**目的，
 > 与该游戏的开发或运营方无任何关联。详见 [NOTICE.md](NOTICE.md)。
