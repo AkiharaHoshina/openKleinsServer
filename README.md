@@ -1,3 +1,7 @@
+<p align="center">
+  <img alt="自由旅舍 FreeKleins —— Server" src="assets/banner.png" width="100%">
+</p>
+
 # openKleinsServer
 
 **《环行旅舍》本地假服务端** —— 让这款已停运的 Unity 手游在你的机器上重新跑起来。
