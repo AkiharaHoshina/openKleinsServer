@@ -650,6 +650,11 @@ def ensure_roles_index(path=None, force=False, log=None):
             pass                      # 文件坏了 ⇒ 重建
     idx = build_roles_index()
     if not idx:
+        # ★ 别静默返回：以前这里什么都不说，表现为「角色工具」页整页空白，
+        #   而日志里只有一句"沿用 (0 个角色)"，查不出是**没表**还是**读错目录**。
+        if log:
+            log("角色名索引: 配置表读不到 (渠道=%s, 目录=%s)"
+                % (CLIENT_DIR or "平面", CFG_DIR))
         return False, 0
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = path + ".tmp"

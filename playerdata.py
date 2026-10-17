@@ -109,6 +109,7 @@ ACTOR_CURRENCY_MIRROR = (("diamond", 1), ("gold", 2), ("copper", 3))
 
 
 def load():
+    global _PENDING_SIGN_PUSH
     try:
         with open(SAVE, "r", encoding="utf-8-sig") as f:
             d = json.load(f)
@@ -206,12 +207,16 @@ def load():
         _boxes = int((d.get("items") or {}).get(str(MONTH_CARD_ITEM_ID), 0))
         changed = False
         if _boxes > 0:
-            if d.get("month_card_days") is None:
-                d["month_card_days"] = MONTH_CARD_DURATION_DAYS * _boxes
-                d["month_card_buy_date"] = _today_str()
+            # ★★ 2026-10-17 修: 以前只在 `month_card_days is None` 时才折算 ——
+            #   于是**第二张月卡**被清净了礼包却一天都没加(实测: 买两次仍是 30 天)。
+            #   每个礼包就是 30 天, 有几张加几张。
+            d["month_card_days"] = (_mc_days_left(d)
+                                    + MONTH_CARD_DURATION_DAYS * _boxes)
+            d["month_card_buy_date"] = _today_str()
             d["items"].pop(str(MONTH_CARD_ITEM_ID), None)
             # ★ 清掉了就得告诉客户端"这格没了"，否则背包界面上那张礼包一直挂着
             _PENDING_ITEM_PUSH.append(MONTH_CARD_ITEM_ID)
+            _PENDING_SIGN_PUSH = True      # 天数变了 -> 业务服补推 1246
             changed = True
         if _mc_tick(d):
             changed = True
@@ -982,6 +987,21 @@ def consume_pending_item_push():
     out = _PENDING_ITEM_PUSH
     _PENDING_ITEM_PUSH = []
     return out
+
+
+# ★ 2026-10-17: `load()` 里的旧存档兜底把月卡礼包折算成天数时，也要让业务服补推
+#   1246(CSLoginSignInfoNotify) —— 否则客户端 `logic_sign.GetSignInfo()` 里的
+#   MonthCardDays 还是登录时的旧值，月卡横幅/弹窗一直显示「未订购」。
+_PENDING_SIGN_PUSH = False
+
+
+def consume_pending_sign_push():
+    """取出并清空"签到/月卡信息变了、需要补推 1246"的标记。"""
+    global _PENDING_SIGN_PUSH
+    if not _PENDING_SIGN_PUSH:
+        return False
+    _PENDING_SIGN_PUSH = False
+    return True
 
 
 # ★★ 2026-10-16 用户要求: 舍友合同换成**新角色**时要弹「获得角色」, 跟抽卡一样。
@@ -4921,15 +4941,62 @@ def _item_by_id():
     global _ITEM_IDX
     if _ITEM_IDX is None:
         import cfgdata
-        _ITEM_IDX = {}
+        idx = {}
         for r in cfgdata.load("dataconfig_itembase").values():
             if isinstance(r, dict) and isinstance(r.get("id"), int):
-                _ITEM_IDX[r["id"]] = r
+                idx[r["id"]] = r
+        # ★★ 空表**不缓存**：服务端可能是在配置表还没 dump / 渠道还没确定的
+        #   时候第一次调用到这里。一旦把空表缓存住，之后所有道具都查不到配置
+        #   (表现为月卡礼包不折算、合同不兑角色…)，而且永远不会自愈。
+        if not idx:
+            return idx
+        _ITEM_IDX = idx
     return _ITEM_IDX
 
 
 _PKG_IDX = None
 _DROP_IDX = None        # dataconfig_item_drop 的缓存, 见 _item_drops()
+
+
+def reset_cfg_caches():
+    """★★★ 渠道切换后必须调用：把**所有从配置表算出来的**模块级缓存清空。
+
+    这些缓存第一次用到时构建、之后永不重建。而服务端是"先起、客户端后连"的：
+    import/启动那一刻 `state/client_channel.json` 可能还不存在、配置表目录可能是
+    空的 —— 那时构建出来的缓存会**永久**保留，症状是某些功能静默不生效
+    (2026-10-17 实测：月卡礼包 4029 没被当场开掉，天数靠 load() 兜底才加上，
+     于是客户端的 1246 推送从未发生，月卡横幅一直显示「未订购」)。
+
+    ★ `cfgdata.switch_client()` 只清它自己的 `_cache`/`_path_of`；
+      playerdata 这些它管不到（也不能反向 import，会循环）。
+    """
+    global _ROLE_CFG_CACHE, _CONTRACT_CACHE, _POTENTIAL_CACHE, _PROTO_ROLE_CACHE
+    global _COOK_CACHE, _GIFT_IDS_CACHE, _GIFT_LIKE_CACHE, _GIFT_LIMIT_CACHE
+    global _RP_ROWS, _TASK_ROWS, _TASK_BY_ID, _ACT_FINISH_ALL, _ROLE_CFG
+    global _MAIL_ROWS, _EXCHANGE_ROWS, _CURRENCY_EXCHANGE, _STAGE_MINOR
+    global _ITEM_IDX, _PKG_IDX, _DROP_IDX, NEW_HAND
+    _ROLE_CFG_CACHE = None
+    _CONTRACT_CACHE = None
+    _POTENTIAL_CACHE = None
+    _PROTO_ROLE_CACHE = None
+    _COOK_CACHE = None
+    _GIFT_IDS_CACHE = None
+    _GIFT_LIKE_CACHE = None
+    _GIFT_LIMIT_CACHE = None
+    _RP_ROWS = None
+    _TASK_ROWS = None
+    _TASK_BY_ID = None
+    _ACT_FINISH_ALL = None
+    _ROLE_CFG = None
+    _MAIL_ROWS = None
+    _EXCHANGE_ROWS = None
+    _CURRENCY_EXCHANGE = None
+    _STAGE_MINOR = None
+    _ITEM_IDX = None
+    _PKG_IDX = None
+    _DROP_IDX = None
+    NEW_HAND = None
+    return True
 
 
 # ★★ drop 表的三种语义（2026-10-16 从 27 个 func=4 箱子逆出来的）:

@@ -476,6 +476,11 @@ def _load_role_index():
     if d:
         return d
     try:
+        # ★★ fakeserver 是**先起、客户端后连**的：`cfgdata` 在 import 那一刻就把
+        #    渠道目录定了（当时 state\client_channel.json 可能还不存在 —— 那文件
+        #    正是**本进程**的 HTTP 处理器后来才写进去的），之后它不会自己更新。
+        #    ⇒ 现场生成前先按最新状态重设一次，否则读的是平面目录（空的）⇒ 空白页。
+        cfgdata.sync_client_from_state()
         wrote, n = cfgdata.ensure_roles_index(ROLES_INDEX, log=log)
         if wrote and n:
             d = _read()

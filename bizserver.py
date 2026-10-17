@@ -454,6 +454,24 @@ def handle(conn, addr):
                     if cfgdata.switch_client(_ch):
                         log("★ 客户端渠道 -> %s ; 配置表目录 %s (渠道 %s)"
                             % (_ch, cfgdata.CFG_DIR, cfgdata.CLIENT_DIR))
+                        # ★★ 2026-10-17: playerdata 那些"配置表算出来的"模块级缓存
+                        #    也必须清 —— `cfgdata.switch_client` 只管它自己那份。
+                        #    服务端启动时渠道可能还没确定，那时建出来的空缓存
+                        #    不清掉就会永久生效(月卡礼包不折算就是这么来的)。
+                        try:
+                            playerdata.reset_cfg_caches()
+                        except Exception as _e3:
+                            log("!! 清配置缓存失败(忽略): %r" % (_e3,))
+                        # ★★ 全新数据目录时，bizserver 启动那会儿渠道还不知道、一张表都
+                        #    读不到 ⇒ 启动时的索引生成必然失败，之后也不会再试。
+                        #    渠道一确定、表就能读了，这里补一次（幂等：文件已在就跳过）。
+                        try:
+                            _w, _n = cfgdata.ensure_roles_index(log=log)
+                            if _n:
+                                log("角色名索引: %s (%d 个角色)"
+                                    % ("已生成" if _w else "沿用", _n))
+                        except Exception as _e2:
+                            log("角色名索引生成失败(忽略): %r" % (_e2,))
                     else:
                         log("★ 客户端渠道 -> %s (未变)" % _ch)
             except Exception as _e:
@@ -605,6 +623,12 @@ def handle(conn, addr):
             if _cf:
                 conn.sendall(push_frame(1052, playerdata.build_item_counts(pd, _cf)))
                 log("   清理残留舍友合同 -> 推 1052 %s" % (_cf,))
+            # ★ 2026-10-17: load() 的兜底把月卡礼包折算成天数时也要推 1246 ——
+            #   否则客户端 logic_sign.GetSignInfo() 还是登录时的旧值，
+            #   月卡横幅/弹窗一直显示「未订购」（天数其实已经加上了）。
+            if playerdata.consume_pending_sign_push():
+                conn.sendall(push_frame(1246, playerdata.build_sign_info(pd)))
+                log("   月卡天数(兜底折算)已变 -> 补推 1246")
             # ★ 能源自然恢复。客户端**不会自己往上加**(实测 view_common_power_ui
             #   只读 GetIntellect()、只挂 INTELLECT_CHANGE 事件, 没有本地计时器),
             #   所以必须服务端推 1067 CSDataNotify。客户端每 ~5 秒一个心跳,
@@ -2005,8 +2029,13 @@ def warm_up():
         #   这里在预热线程里顺手生成一次（幂等：文件已在就一个字节都不动）。
         try:
             _wrote, _n = cfgdata.ensure_roles_index(log=log)
-            log("角色名索引: %s (%d 个角色)"
-                % ("已生成" if _wrote else "沿用", _n))
+            if _n:
+                log("角色名索引: %s (%d 个角色)"
+                    % ("已生成" if _wrote else "沿用", _n))
+            else:
+                # 启动时渠道还没定、配置表还没 dump 出来是**正常**情况 ——
+                # 客户端登录后切到对应渠道目录时会补生成（见 handle()）。
+                log("角色名索引: 暂缺（等客户端登录、渠道确定后再生成）")
         except Exception as _e:
             log("角色名索引生成失败(不影响启动): %r" % (_e,))
     except Exception as e:
