@@ -5337,11 +5337,17 @@ UPDATE_TYPE_HEAD_FRAME_ID = 3
 UPDATE_TYPE_SIGN = 4
 UPDATE_TYPE_HONOR = 5
 
-RET_ITEM_NOT_ENOUGH = 54       # EnmRetCode ITEM_NOT_ENOUGH
+RET_ITEM_NOT_ENOUGH = 54       # 文案 54 =「物品不足」
 # ★ 2026-10-15: 自选包"没选中任何物品"用这个码 —— 文案 69 =「该物品相关参数错误」
 #   (见 _re\lang_zh.json)。客户端会照着弹提示。
 RET_ITEM_PARAM_ERROR = 69
-RET_NAME_INVALID = 122         # 兜底用; 客户端自己也会先校验(4~11 字)
+# ★★★ 客户端的 ret_code **就是语言 id**：它直接 `Utils.GetText(ret)` 弹提示。
+#   2026-10-18 踩过: 这里原来是 122，以为是个随便的错误码 —— 而 122 的文案是
+#   「今日已签到」，于是改名字被拒时弹的是"今日已签到"（查了半天）。
+#   ⇒ 只能用**文案对得上**的 id：
+#     203 =「请输入名字」  206 =「请保证名字长度为4到14个字符」
+RET_NAME_EMPTY = 203
+RET_NAME_INVALID = 206
 
 
 def _head_icons():
@@ -5520,6 +5526,22 @@ def frame_unlocked(d, fid):
     return int((d.get("items") or {}).get(str(iid), 0)) > 0
 
 
+def _name_width(s):
+    """按**客户端**的算法数名字长度（`logic_create_role.characters`, proto#7）。
+
+    每个字符算 `min(UTF-8 字节数, 2)` ⇒ ASCII = 1，汉字/全角 = 2。
+
+    ★★ 2026-10-18 踩过：以前用 Python 的 `len()`（三个汉字算 3）⇒ 客户端眼里合法
+      的「大星奕」(宽度 6) 被服务端判成 3、拒绝改名。客户端 proto#7 的原始逻辑：
+          for 每个字节: step = Bytes4Character(b); n += min(step, 2)
+      而且 `CheckName` **只校验下限 4**（没有上限），所以这里也放开到文案里的 14。
+    """
+    n = 0
+    for ch in s:
+        n += min(len(ch.encode("utf-8")), 2)
+    return n
+
+
 def update_player_center(d, data_type, pc):
     """处理 CSUpdatePlayerCenterDataReq{1:DataType 2:PlayerCenter}。
 
@@ -5531,9 +5553,11 @@ def update_player_center(d, data_type, pc):
 
     if dt == UPDATE_TYPE_NAME:
         name = str(pc.get("name") or "")
-        n = len(name)
-        if n < 4 or n > 11:
-            return RET_NAME_INVALID, "名字长度必须是 4~11"
+        if not name.strip():
+            return RET_NAME_EMPTY, "名字不能为空"
+        n = _name_width(name)          # ★ 按客户端算法数（汉字算 2），不是 len()
+        if n < 4 or n > 14:
+            return RET_NAME_INVALID, "名字宽度 %d 不在 4~14（客户端算法）" % n
         if name == str(a.get("name") or ""):
             return 0, "名字没变"
         # ★ 扣改名道具(item 37 / 175)。客户端虽然会先检查, 但**扣必须由服务端做** ——
