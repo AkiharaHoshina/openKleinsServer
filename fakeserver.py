@@ -22,6 +22,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import unquote, urlparse, parse_qs
 
 import paths
+import cfgdata
 
 def _base_dir():
     """打包成 exe 后 __file__ 指向临时解包目录, 必须改用 exe 自身所在目录。"""
@@ -69,9 +70,24 @@ NOTICE_TPL = os.path.join(ROOT, "notice_page.html")   # 外置排版模板, 热�
 SWITCH_NOTICE_ID = 1002
 ACT_JSON = paths.data_path("KLEINS_TURN_ACT_JSON", "state", "turn_activity.json")
 
+# ★★★ 必须是**三条**，和 `playerdata.TURN_ACTIVITY_LINES` 以及客户端写死的
+#   `model_turn_activity_data.LimitActivityTimeId` 对齐:
+#       Emotion = 20001 / Carmen = 50001 / Sleep = 70001
+#   ★ 2026-10-17 踩过: 这里原来只有两条（缺 20001）。`turn_activity.json` 在
+#     用户数据目录里被清空时，页面就退化到这份 fallback ⇒「活动切换」页
+#     **根本不显示情绪线**，而页面文案还写着"一共三条线"，自相矛盾。
+#   ⇒ 以后加/删线路，三处要一起改（这里 / playerdata / 客户端）。
 _ACT_FALLBACK_LINES = [
     {"time_id": 50001, "name": "幕前序曲", "desc": "卡门线 (Carmen)"},
     {"time_id": 70001, "name": "伴好梦入眠", "desc": "寝取线 (Sleep)"},
+    {"time_id": 20001, "name": "非等张共鸣",
+     "desc": "情绪线 (Emotion) — 无章节数据，切过去可能是空白页"},
+    # ★ 初霜与春风: 是**章节目录里的活动章节线**（章节 4011/4012/4013），
+    #   客户端的 LimitActivityTimeId 只有三条分支，把它设成"当前活动"会让
+    #   ServiceDataInitOK 三个分支全不匹配 ⇒ 主页活动入口整个消失。
+    #   所以它只能**列出来当说明**，不能点。
+    {"time_id": 80001, "name": "初霜与春风", "selectable": False,
+     "desc": "章节线 (4011~4013) — 不是回合活动，从关卡列表进"},
 ]
 
 
@@ -440,13 +456,32 @@ TOOL_MODES = [("drop", "删除角色", "把这个角色从存档里删掉（含�
 
 
 def _load_role_index():
-    """角色 id(str) -> 名字。读不到就回空表(页面会退化成只显示 id)。"""
+    """角色 id(str) -> 名字。
+
+    ★★★ 缺文件就**现场从配置表生成**（2026-10-17）。
+      以前必须手动跑 `python tools\\make_roles_index.py`；不跑的话
+      `_load_role_index()` 返回空表，而「角色工具」页是**遍历这张表**渲染的
+      ⇒ 页面**整个是空的**（老注释写"退化成只显示 id"是错的，实测什么都没有）。
+      现在：缺文件 → `cfgdata.ensure_roles_index()` 现场算一份再读。
+    """
+    def _read():
+        try:
+            with open(ROLES_INDEX, "r", encoding="utf-8") as f:
+                d = json.load(f)
+            return d if isinstance(d, dict) else {}
+        except Exception:
+            return {}
+
+    d = _read()
+    if d:
+        return d
     try:
-        with open(ROLES_INDEX, "r", encoding="utf-8") as f:
-            d = json.load(f)
-        return d if isinstance(d, dict) else {}
-    except Exception:
-        return {}
+        wrote, n = cfgdata.ensure_roles_index(ROLES_INDEX, log=log)
+        if wrote and n:
+            d = _read()
+    except Exception as e:
+        log("★ 角色名索引生成失败: %r" % (e,))
+    return d
 
 
 def _write_tool_flag(mode, ids):

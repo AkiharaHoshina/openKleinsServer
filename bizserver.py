@@ -2000,6 +2000,15 @@ def warm_up():
             except Exception:
                 pass
         log("配置表预热完成 (登录不再卡解析)")
+        # ★ 角色名索引（「角色工具」页要用）。以前必须手动跑
+        #   `python tools\make_roles_index.py`，不生成的话那一页是**全空的**。
+        #   这里在预热线程里顺手生成一次（幂等：文件已在就一个字节都不动）。
+        try:
+            _wrote, _n = cfgdata.ensure_roles_index(log=log)
+            log("角色名索引: %s (%d 个角色)"
+                % ("已生成" if _wrote else "沿用", _n))
+        except Exception as _e:
+            log("角色名索引生成失败(不影响启动): %r" % (_e,))
     except Exception as e:
         log("配置表预热失败(不影响功能): %r" % (e,))
 

@@ -30,6 +30,7 @@
     "登录转圈" 复发。详见 _digest() 的注释。
 """
 import hashlib
+import json
 import os
 import pickle
 import sys
@@ -166,25 +167,24 @@ def _table_path(name):
 
 def cfg_report():
     """给启动横幅用：返回 (是否找到, 人类可读的多行说明)。"""
-    found = os.path.isfile(os.path.join(CFG_DIR, SENTINEL))
-    if not os.path.isdir(CFG_DIR):
-        n = 0
-        names = set()
-    else:
-        names = {f for f in os.listdir(CFG_DIR)
-                 if f.startswith("dataconfig_") and f.endswith(".txt")}
-        n = len(names)
-    # ★ 2026-10-17: 报一下渠道子目录用了多少张、退回平面多少张 ——
-    #   这个数字直接告诉使用者"客户端自己那份表到底 dump 出来了没有"。
-    n_own = n_fb = 0
-    if CLIENT_DIR:
+    def _names(d):
         try:
-            own = [f for f in os.listdir(os.path.join(CFG_DIR, CLIENT_DIR))
-                   if f.startswith("dataconfig_") and f.endswith(".txt")]
-            n_own = len(own)
+            return {f for f in os.listdir(d)
+                    if f.startswith("dataconfig_") and f.endswith(".txt")}
         except Exception:
-            n_own = 0
-    n_fb = max(0, n - n_own)
+            return set()
+
+    flat = _names(CFG_DIR)
+    own = _names(os.path.join(CFG_DIR, CLIENT_DIR)) if CLIENT_DIR else set()
+    # ★★★ 服务端**实际能读到**的表 = 渠道目录 ∪ 平面目录（渠道优先，平面兜底）。
+    #   2026-10-17 修: 以前这里只数**平面目录**、哨兵也只在平面目录里找 ——
+    #   渠道化之后表都 dump 在 <cfg>\<渠道>\ 里，于是明明有 67 张却报
+    #   "找到 0 张 / 没找到配置表"，把人吓得以为白 dump 了。
+    eff = own | flat
+    n = len(eff)
+    n_own, n_fb = len(own), len(flat - own)
+    # ★ `SENTINEL` 本身就带 `.txt`，`_table_path()` 会自动再接一个 ⇒ 这里要去掉。
+    found = os.path.isfile(_table_path(SENTINEL[:-4]))
     lines = ["配置表目录 : %s" % CFG_DIR,
              "渠道子目录 : %s  (来自它 %d 张 / 退回平面 %d 张)"
              % (CLIENT_DIR or "（无 —— 全部读平面目录）", n_own, n_fb),
@@ -196,7 +196,7 @@ def cfg_report():
                   "    建议：启动一次客户端让它 dump 出 <cfg>\\<SubPlatType>\\ 之后重启本服务端；",
                   "    或设环境变量 KLEINS_CFG_CLIENT 指定渠道目录。"]
     if not found:
-        missing = [e + ".txt" for e in ESSENTIAL if e + ".txt" not in names]
+        missing = [e + ".txt" for e in ESSENTIAL if e + ".txt" not in eff]
         lines += [
             "",
             "  ！！ 没找到配置表 —— 服务端能启动，但关卡/抽卡/商店/任务等会全部是空的。",
@@ -599,6 +599,66 @@ def all_skin_ids():
     """全部皮肤 id (dataconfig_skin_config)"""
     return sorted(int(r["skin_id"]) for r in load("dataconfig_skin_config").values()
                   if isinstance(r.get("skin_id"), int))
+
+
+# ======================================================================
+#  角色名索引 (roles_index.json)                           2026-10-17
+# ======================================================================
+#  ★ 以前这份索引必须**手动**跑 `python tools\make_roles_index.py` 生成。
+#    没生成时 `fakeserver._load_role_index()` 返回空表，而「角色工具」页是
+#    **遍历这张表**渲染的 ⇒ 页面**整个是空的**（不是老注释说的"只显示 id"）。
+#  ⇒ 改成自动生成：bizserver 启动时生成一次，fakeserver 打开角色工具页前
+#    发现缺文件就现场补。产物落在 <用户数据>\resources\roles_index.json。
+#  ★ 内容是从**配置表**算出来的（dataconfig_role_config + dataconfig_language），
+#    所以它属于游戏派生数据，不进 git —— 每个渠道自己算一份。
+def build_roles_index():
+    """{角色id(str): 名字}。配置表读不到就返回 {}（不抛）。"""
+    lang = {}
+    for r in load("dataconfig_language").values():
+        if isinstance(r, dict):
+            i, t = r.get("id"), r.get("text")
+            if isinstance(i, int) and isinstance(t, str):
+                lang[str(i)] = t
+    out = {}
+    for r in load("dataconfig_role_config").values():
+        if not isinstance(r, dict):
+            continue
+        rid = r.get("id")
+        if not isinstance(rid, int) or rid <= 0:
+            continue
+        nm = r.get("name")
+        out[str(rid)] = lang.get(str(nm), "") if nm is not None else ""
+    return out
+
+
+def ensure_roles_index(path=None, force=False, log=None):
+    """保证 `roles_index.json` 存在。返回 `(是否写入, 条目数)`。**幂等**。
+
+    `path` 不给就用 `paths.data_path(...)`
+    （= `<用户数据>\\resources\\roles_index.json`）。
+    ★ 配置表还没 dump 出来时返回 `(False, 0)` 且**不留半成品**，下次再试。
+    """
+    path = path or paths.data_path("KLEINS_ROLES_INDEX", "resources",
+                                   "roles_index.json")
+    if not force and os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                d = json.load(f)
+            if isinstance(d, dict) and d:
+                return False, len(d)
+        except Exception:
+            pass                      # 文件坏了 ⇒ 重建
+    idx = build_roles_index()
+    if not idx:
+        return False, 0
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(idx, f, ensure_ascii=False, indent=0, sort_keys=True)
+    os.replace(tmp, path)             # 原子替换, 不会留下半个文件
+    if log:
+        log("角色名索引已生成: %s (%d 个角色)" % (path, len(idx)))
+    return True, len(idx)
 
 
 if __name__ == "__main__":
