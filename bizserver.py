@@ -1131,11 +1131,14 @@ def handle(conn, addr):
                 #   差别在扫荡: 副本 sweep_intellect 10~30, 主线 0~24。扫荡命令
                 #   1091~1096 目前整个没接。)
                 sb = {}
+                _gi = None                      # ★ 请求里的 GroupIdx(0-based)
                 for f2, w2, v2 in B.pb_fields(body or b""):
                     if f2 == 1 and w2 == 2:
                         for f3, w3, v3 in B.pb_fields(v2):
                             if w3 == 0:
                                 sb[f3] = v3
+                    elif f2 == 3 and w2 == 0:
+                        _gi = v2
                 _cost = playerdata.stage_intellect(
                     sb.get(1, 0), sb.get(2, 0), sb.get(3, 0), sb.get(4, 0))
                 ok, pay, left = playerdata.consume_stage_intellect(
@@ -1149,13 +1152,20 @@ def handle(conn, addr):
                         % (pd["actor"]["intellect"], _cost, sb.get(1, 0), sb.get(2, 0),
                            sb.get(3, 0), sb.get(4, 0)))
                     continue
-                conn.sendall(B.build_reply(1074, seq,
-                                           body=playerdata.build_stage_start(pd)))
+                conn.sendall(B.build_reply(
+                    1074, seq,
+                    body=playerdata.build_stage_start(
+                        pd, _gi,
+                        (sb.get(1, 0), sb.get(2, 0),
+                         sb.get(3, 0), sb.get(4, 0)))))
                 if pay:
                     for _nb in playerdata.build_energy_notify_bodies(pd):
                         conn.sendall(push_frame(1067, _nb))
-                log("-> cmd=1075 (开战 %s/%s/%s/%s, 耗能源 %d -> %d)"
-                    % (sb.get(1, 0), sb.get(2, 0), sb.get(3, 0), sb.get(4, 0), pay, left))
+                _gids = (playerdata._group_role_ids(pd, _gi)
+                         if _gi is not None else [])
+                log("-> cmd=1075 (开战 %s/%s/%s/%s, 编队=%s 人数=%d, 耗能源 %d -> %d)"
+                    % (sb.get(1, 0), sb.get(2, 0), sb.get(3, 0), sb.get(4, 0),
+                       _gi, len(_gids), pay, left))
                 continue
             # --- 还原数据 (登录页「还原数据」按钮, 2026-10-15) ---
             # 自定义命令 19000 -> 19001。ECV 枚举只到 1410, 这个号绝不撞车。
@@ -1331,13 +1341,17 @@ def handle(conn, addr):
                 g = pd["groups"].get(str(int(gi) + 1)) if gi is not None else None
                 if g is not None and slot is not None:
                     mem = g.setdefault("members", [])
+                    # ★ 客户端队列界面只有 MAX_MEMBER(10) 个槽位；越界槽位一律忽略
                     if mt == 0:                  # 移除
                         if 0 <= slot < len(mem):
                             mem.pop(slot)
-                    else:                        # 放置/替换
+                    elif 0 <= int(slot) < playerdata.MAX_MEMBER:   # 放置/替换
                         while len(mem) <= slot:
                             mem.append([0, 0])
                         mem[slot] = [int(hid or 0), int(tid or 0)]
+                    else:
+                        log("   !! 编队槽位越界 slot=%s (最大 %d) —— 已忽略"
+                            % (slot, playerdata.MAX_MEMBER))
                     playerdata.save(pd)
                     log("   编队 %s 修改: type=%s slot=%s hero=%s -> %s"
                         % (gi, mt, slot, hid, mem))
@@ -1378,7 +1392,8 @@ def handle(conn, addr):
                         members.append([int(rt.get(1, 0)), int(rt.get(2, 0))])
                 g = pd["groups"].get(str(int(m.get(1, 0)) + 1))
                 if g is not None:
-                    g["members"] = members
+                    # ★ 客户端只渲染 MAX_MEMBER 个槽位，多的存了也没用
+                    g["members"] = members[:playerdata.MAX_MEMBER]
                     playerdata.save(pd)
                     log("   快捷编队 %s -> %s" % (m.get(1), members))
                 conn.sendall(B.build_reply(1078, seq, body=b""))
@@ -1915,6 +1930,17 @@ def handle(conn, addr):
                                "(含首三星)" if _fc_first3 else "",
                                _fc_gain[:6]))
                     continue
+                # ★★★ 2026-10-18 修「某些教程演示关卡卡在结算界面」：
+                #   以前 `if stage:` 不成立就**一个字节都不回** ⇒ 客户端永远等回包。
+                #   某些教程/演示关的 CSStageFinishReq 里 Stage 解析不出数字字段
+                #   (字段形状不同/为空)，正好踩中。宁可回个「0 星、无掉落」的空结算，
+                #   也不能让客户端干等。
+                log("   !! 1076 里没解析出 Stage (bodyLen=%d) —— 回空结算避免卡死"
+                    % len(body or b""))
+                rb = (B.pb_b(1, playerdata.build_finish_data(0, [], False))
+                      + B.pb_b(3, playerdata.build_gamedata(pd)))
+                conn.sendall(B.build_reply(1076, seq, body=rb))
+                continue
 
             # --- 设置(KeyValuePair)服务端存储 ---
             if cmd == 1235:        # CSGetAllSettingsReq -> CSGetAllSettingsRes

@@ -3,6 +3,78 @@
 本项目遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 `0.x` 阶段视为「能玩，但不保证接口稳定」。
 
+## [0.9.5] — 2026-10-18
+
+### 修复
+
+- **某些教程/演示关卡卡在结算界面** —— `CSStageFinishReq`(1076) 里如果解析不出
+  `Stage`，旧代码**一个字节都不回** ⇒ 客户端永远等回包。现在会回一个
+  「0 星、无掉落」的空结算，并在日志里喊出来。
+- **马缇长街的三个货币（稀因/格/因）工作不正常** —— 「还原数据」只写
+  `actor.diamond/gold/copper`，而顶栏读的是 `items[1/2/3]`，`load()` 末尾的
+  `ACTOR_CURRENCY_MIRROR` 又用 items 反向覆盖 actor ⇒ `_options` 里的数值当场失效
+  （基准档 items[2]=1000000 / `_options.gold`=10000 ⇒ 顶栏 100 万、日志 10000）。
+  现在三币**同时**写 actor 和 items。
+- **不吹霜卡池在国服不工作** —— 卡池每批只下发 5 个（客户端 LoopScrollRect 只有
+  5~6 个格子，发多了 `ChangePool(下标)` 会崩），但服务端原来按 **id 顺序**切批 ⇒
+  不吹霜池(31) 排在第 7 批，界面的「换一批」翻不到。现在先按客户端的
+  `recruit_ui_config.sort_id` 排序（同档新池在前），不吹霜池落到**第 1 批**。
+- **编队超过 10 人 / 连续打关后编队不继承** —— 客户端队列界面是写死的
+  `for i = 1, 10`（`view_queue_normal_ui` proto#8）。服务端以前对 1060/1078
+  不设上限，存档里可能塞进 >10 个成员 ⇒ 客户端只渲染前 10 个，两边状态分叉。
+  现在 1060/1078/1055 全部按 `MAX_MEMBER`(10) 截断，越界槽位直接忽略并写日志。
+
+### 变更
+
+- **基准档三币统一 1,000,000** —— `baseline.json` 的 `_options` /
+  `save.items[1..3]` / `save.actor` 与 `playerdata.CURRENCY_SEED` **四处一致**。
+  ★ 只改一两处就会出现"日志和顶栏对不上"。
+- `_syncfromrepo.py` 把 `baseline.json` 也纳入同步校验（它是运行期读取的文件，
+  以前改完仓库版、工作副本还是旧档）。
+
+- **限定卡池保底完全没生效** —— 两个错叠在一起：
+  1. `draw()` 用 `pool_type == 2` 判断限定池，但配置里限定池（不吹霜 31）是
+     **pool_type = 4** ⇒ 它连 UP 保底都没有，只能靠 2% 再除以池内角色数硬撞。
+  2. `up_pity` 拿到**任意** SSR 就清零 ⇒ 70 抽的软保底先出 SSR 就把计数清了，
+     **140 的硬保底永远到不了**（几百抽不出限定就是这么来的）。
+  现在：`up_pity` 只在拿到**当期 UP** 时清零（140 硬保底），
+  `ssr_pity` 在拿到任意 SSR 时清零（70 软保底），自然出 SSR 也是 50% UP / 50% 常驻。
+
+- **战斗里的编队和外面选的编队完全不是一个东西** —— 反汇编
+  `logic_chapter.StageStartResBack`(proto#10) 最后一句是
+  `scene_mgr.GoBattle(..., StartData.BattleUID, StartData.RoleList)`
+  ⇒ **战斗队列就是 `StartData.RoleList`**。服务端以前把 `d["roles"]`
+  （全部已拥有角色）全发过去，根本没看请求里的 `GroupIdx` ⇒ 战斗里出现的是
+  所有角色（用户截图里 15 个），而不是编队里的那 10 个。
+  现在按 `CSStageStartReq.GroupIdx`（0-based）只发该编队的成员、保持槽位顺序；
+  编队为空时退回第一个非空编队，全空才退回全部角色（兜底不崩）。
+
+- **教程关的锁定教学角色是空的** —— 教程战斗的队列同样来自 `StartData.RoleList`，
+  但教学角色（本渠道是 1030 / 1040 / 1045 / 1046）玩家**可能还没拥有**，
+  编队里也没有他们 ⇒ 客户端锁定的教学角色没有数据、教程推不下去。
+  现在从 `dataconfig_guide_config` 推导：
+  - `gtype=15 (g_enter_battle_scene)` 的 `params_int` = **教程关卡 id**
+  - `gtype=35 (g_battle_lock_roles)` / `gtype=30 (g_put_on_role)` = **锁定角色**
+  教程关的 `StartData.RoleList` 会补上这些角色的数据（没拥有就用最小可用数据合成）。
+  ★ 推导用的是**当前渠道自己的表**，STEAM 版同样适用；表读不到时集合为空、
+    行为退回到改动前（不会把 Steam 弄坏）。
+  ★ 客户端侧把 `dataconfig_guide_config` 加进了 PROACTIVE 清单，首次运行就会 dump。
+
+### 自检
+
+- 新增 `_selftest_baseline_currency.py`（16 项）：三处货币一致 / 重置后 items 与
+  actor 都是 1,000,000 / 再 load 一次仍一致。
+- 新增 `_selftest_stagequeue.py`（10 项）：RoleList 只含指定编队 /
+  教程关自动补锁定角色 / 普通关不塞教程角色。
+- 新增 `_selftest_pity.py`（11 项）：pool_type=4 识别为限定 / 第 140 抽必出 UP /
+  常驻 SSR 不清 up_pity / 140 连抽必见 UP / 常驻池 70 保底。
+
+### 客户端改动（需要重新打补丁 / 覆盖 Win\\lua）
+
+- `inject_recruit.py`：限定池的 `paint_type`（`cardpool_restrict_*`）与原版
+  `ChangePool` 不兼容 —— 不吹霜池一选中就 `attempt to index a nil value`。
+  已在查表层把这类池的面板换成通用面板（角色/名称/时间仍用本池的）。
+
 ## [0.9.4] — 2026-10-18
 
 ### 修复

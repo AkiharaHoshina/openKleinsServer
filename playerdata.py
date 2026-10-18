@@ -577,11 +577,124 @@ def build_stage_list(d):
 # CSStageStartRes { 1:StartData(CSStageStartData) }
 #   CSStageStartData { 1:ServerTime(int64) 2:RoleList(repeated CSRoleData)
 #                      3:BattleUID(uint64) 4:ReverseTagList(repeated Uint32Id) }
-def build_stage_start(d):
+def _guide_rows(gtype):
+    """dataconfig_guide_config 里 gtype 匹配的行（读不到就返回空列表）。"""
+    try:
+        import cfgdata
+        return [r for r in cfgdata.load("dataconfig_guide_config").values()
+                if isinstance(r, dict) and int(r.get("gtype") or 0) == int(gtype)]
+    except Exception:
+        return []
+
+
+def _tutorial_stage_rows():
+    """教程战斗的关卡 row id 集合。
+
+    `gtype=15` = `g_enter_battle_scene`，`params_int[1]` 就是关卡 id
+    （例如 31011 = 1:1000:1:1、31021）。
+    ★ 从**当前渠道自己的** guide_config 推导，不写死数字 —— Steam 国服通用。
+    """
+    out = set()
+    for r in _guide_rows(15):
+        for v in (r.get("params_int") or {}).values():
+            if isinstance(v, int) and v > 0:
+                out.add(v)
+    return out
+
+
+def _tutorial_role_ids():
+    """教程里被锁定/安排上场的角色。
+
+    - `gtype=35` = `g_battle_lock_roles`：params_int 全是角色 id（1040 / 1045 / 1046）
+    - `gtype=30` = `g_put_on_role`：params_int[1] 是角色 id（1030 / 1040 / 1045 / 1046）
+    ★ 这些角色教程里**玩家可能还没有** —— 但战斗队列(StartData.RoleList)必须有
+      它们的数据，否则客户端锁定的教学角色是空的、教程没法推进。
+    """
+    out = set()
+    for r in _guide_rows(35):
+        for v in (r.get("params_int") or {}).values():
+            if isinstance(v, int) and 0 < v < 100000:
+                out.add(v)
+    for r in _guide_rows(30):
+        v = (r.get("params_int") or {}).get(1)
+        if isinstance(v, int) and 0 < v < 100000:
+            out.add(v)
+    return out
+
+
+def _synthetic_role(rid):
+    """给"教程送但玩家没拥有"的角色造一份最小可用的 CSRoleData。"""
+    return {"level": 1, "exp": 0, "strength": 0, "potential": 0,
+            "ability": 1, "skin": 0}
+
+
+def _group_role_ids(d, group_idx):
+    """某个编队(0-based)里的角色 id 列表，按槽位顺序。编队为空返回 []。"""
+    g = (d.get("groups") or {}).get(str(int(group_idx) + 1)) or {}
+    out = []
+    for m in (g.get("members") or []):
+        try:
+            rid = int(m[0])
+        except Exception:
+            continue
+        if rid > 0:
+            out.append(rid)
+    return out
+
+
+def build_stage_start(d, group_idx=None, stage=None):
+    """CSStageStartRes{1:StartData}
+
+    ★★★ 2026-10-18 「游戏内和游戏外的编队完全不是一个东西」：
+      反汇编 `logic_chapter.StageStartResBack`(proto#10) 最后一句是
+          scene_mgr.GoBattle(..., StartData.BattleUID, StartData.RoleList)
+      ⇒ **战斗队列就是 StartData.RoleList**。以前这里把 `d["roles"]`（所有
+      已拥有角色）全发过去，完全没看请求里的 GroupIdx ⇒ 战斗里出现的是全部
+      角色（用户截图里 15 个），而不是编队里的那 10 个。
+      ⇒ 现在按 `CSStageStartReq.GroupIdx`（**0-based**）只发该编队的成员，
+        顺序 = 槽位顺序。编队为空时退回"第一个有人的编队"，再不行才发全部
+        （避免空编队把客户端搞成零角色）。
+    """
     import time as _t
     sd = B.pb_v(1, int(_t.time()))
-    for rid, rd in d["roles"].items():
+    ids = []
+    if group_idx is not None:
+        ids = _group_role_ids(d, group_idx)
+    if not ids:
+        for i in range(GROUP_COUNT):
+            ids = _group_role_ids(d, i)
+            if ids:
+                break
+
+    # ★★★ 2026-10-18 教程关：锁定角色必须在 RoleList 里
+    #   `dataconfig_guide_config` 里 gtype=35(g_battle_lock_roles) / gtype=30(g_put_on_role)
+    #   记录了教程用的角色（1040 / 1045 / 1046 / 1030 …），而这些角色玩家**可能还没拥有**。
+    #   以前只发编队成员 ⇒ 客户端锁定的教学角色没有数据 ⇒ 教程没法推进。
+    #   只在"教程战斗"（gtype=15 的 params_int 里的关卡 id）里追加。
+    _is_tutorial = False
+    if stage is not None:
+        try:
+            row = _stage_minor().get(tuple(int(x) for x in stage))
+            if row is not None and int(row.get("id") or 0) in _tutorial_stage_rows():
+                _is_tutorial = True
+        except Exception:
+            _is_tutorial = False
+    if _is_tutorial:
+        for rid in sorted(_tutorial_role_ids()):
+            if rid not in ids:
+                ids.append(rid)
+
+    if not ids:
+        ids = [int(k) for k in d["roles"].keys()]
+    emitted = 0
+    for rid in ids:
+        rd = (d.get("roles") or {}).get(str(rid))
+        if not isinstance(rd, dict):
+            if not _is_tutorial:
+                continue
+            rd = _synthetic_role(rid)      # 教程角色: 玩家没拥有也要给数据
         sd += bs(2, build_role(rid, rd))
+        emitted += 1
     sd += B.pb_v(3, 1)                                        # BattleUID
     return bs(1, sd)
 
@@ -611,7 +724,10 @@ def build_hero_group(d):
         cd += uv(2, i - 1)                                   # 0-based GroupIdx
         cd += uv(3, MAX_MEMBER)
         # 槽位 = MemberList 的下标, 所以中间的空位要占位(roleId=0), 末尾的空位裁掉
-        mem = list(g.get("members", []))
+        # ★★ 2026-10-18: 必须按 MAX_MEMBER 截断。客户端的队列界面是**写死的
+        #   `for i = 1, 10`**（view_queue_normal_ui proto#8），超过 10 的成员
+        #   客户端根本不渲染 —— 存档里留多了只会让"编队结果对不上"。
+        mem = list(g.get("members", []))[:MAX_MEMBER]
         while mem and int(mem[-1][0]) == 0:
             mem.pop()
         for m in mem:
@@ -766,15 +882,39 @@ RECRUIT_PAGE_SIZE = 5
 CLIENT_MISSING_POOL_IDS = frozenset({35, 36, 37, 38, 39, 40})
 
 
+def _pool_sort_ids():
+    """{pool_id: sort_id} —— 客户端排序用的优先级（`recruit_ui_config.sort_id`）。"""
+    try:
+        import cfgdata
+        m = {}
+        for r in cfgdata.load("dataconfig_recruit_ui_config").values():
+            if isinstance(r, dict) and isinstance(r.get("pool_id"), int):
+                m[r["pool_id"]] = int(r.get("sort_id") or 99)
+        return m
+    except Exception:
+        return {}
+
+
 def _recruit_pools():
     """**剔掉客户端没有的卡池**之后的列表 —— 下发和分页都必须走它。
 
     ★ 不能只在下发时过滤：`recruit_page_count()` 也要用同一个列表，
       否则翻页会翻出空页。
+
+    ★★ 2026-10-18 修「国服修补后不吹霜卡池不工作」：
+      客户端 `logic_recruit_pay.GetPoolData()` 会按 `recruit_ui_config.sort_id`
+      排序（小的优先，同档按 id），但**只在服务端发来的这一批里排**。
+      服务端如果按 id 切批，新池会沉到最后一批：不吹霜池(31) 在 34 个池里
+      排第 31 位 ⇒ **第 7 批**，而界面上的「换一批」翻几次根本到不了。
+      ⇒ 服务端先按客户端的顺序排（sort_id 升序、同档**新池在前**），再切批。
     """
     import cfgdata
-    return [p for p in cfgdata.recruit_pools()
-            if int(p[0]) not in CLIENT_MISSING_POOL_IDS]
+    ps = [p for p in cfgdata.recruit_pools()
+          if int(p[0]) not in CLIENT_MISSING_POOL_IDS]
+    sk = _pool_sort_ids()
+    # 同档里 id 大的（更新的池）排前面 —— 否则 new 池仍然是最后才看得到
+    ps.sort(key=lambda p: (sk.get(int(p[0]), 99), -int(p[0])))
+    return ps
 
 
 def recruit_page(d):
@@ -801,7 +941,12 @@ def build_recruit_info(d=None):
         sel = pools[:RECRUIT_PAGE_SIZE]
     r = b""
     for pid, ptype, pname, ups, _one, _ten in sel:
-        rp = uv(1, ptype) + uv(2, pid) + bs(3, pname)
+        # ★★ 2026-10-18: 配置里的限定池是 pool_type=4，而客户端的
+        #   `EnmRecruitPoolType` 枚举只有 0..3（None/Normal/Up/NewHand）。
+        #   发 4 进去等于给客户端一个**未定义枚举值** —— 客户端切这个池会崩
+        #   (`attempt to index a nil value`)。限定池本质就是 UP 池 ⇒ 按 2 发。
+        _send_type = 2 if int(ptype) == 4 else int(ptype)
+        rp = uv(1, _send_type) + uv(2, pid) + bs(3, pname)
         rp += uv(4, FAR_FUTURE) + uv(5, 1)
         for rid in ups:
             rp += bs(6, uv(1, rid))
@@ -1741,7 +1886,17 @@ def draw(pd, pool_id, times):
     rec = pd.setdefault("recruit", {})
     rec.setdefault("up_pity", 0)
     rec.setdefault("normal_pity", 0)
-    limited = bool(ups) and ptype == 2          # 2 = EnmRecruitPoolType.Up
+    rec.setdefault("ssr_pity", 0)               # 限定池: 距离上次**任意 SSR** 的抽数
+    # ★★★ 2026-10-18 修「限定池保底不生效」：
+    #   `dataconfig_recruit_pools.pool_type` 的实际取值是 1/2/3/**4**：
+    #     2 = Enm_RecruitPoolType_Up（常规 UP 池）
+    #     4 = **限定池**（客户端的 paint_type 是 cardpool_restrict_*，
+    #         例如不吹霜池 31）—— 客户端枚举里没有 4，但配置里就是这么写的。
+    #   旧代码 `ptype == 2` 只认常规 UP 池 ⇒ **限定池完全没有 UP 保底**，
+    #   不吹霜只能靠 2% 的 SSR 再除以池内角色数撞出来（几百抽不出很正常）。
+    limited = bool(ups) and ptype in (2, 4)
+    # 「常驻 SSR」= 池内 4 星里排除当期 UP —— 70 抽的软保底在这两者之间 50/50
+    std_ssr = [r for r in ssr if r not in ups] or ssr
 
     def new_role(rid):
         pd["roles"][str(rid)] = {"level": 1, "exp": 0, "strength": 0,
@@ -1750,17 +1905,27 @@ def draw(pd, pool_id, times):
     out = []
     for _ in range(max(1, times)):
         if limited:
-            n = rec["up_pity"] + 1
-            if n >= 140:                                    # 硬保底: 必出当期UP
-                rid = ups[0] if ups else random.choice(ssr)
-            elif n >= 70:                                   # 软保底: UP 或常驻
-                rid = random.choice(ups) if (ups and random.random() < 0.5) \
-                    else random.choice(ssr)
-            elif random.random() < SSR_RATE:
-                rid = random.choice(ssr)
+            # ★★ 两个计数**分开**：
+            #   `up_pity`  只在上次拿到**当期 UP** 时清零 —— 140 硬保底看它；
+            #   `ssr_pity` 在拿到**任意 SSR** 时清零 —— 70 软保底看它。
+            #   旧代码把两者混成一个：拿到**常驻** SSR 就把 up_pity 也清了 ⇒
+            #   70 抽总会先出 SSR，140 的硬保底**永远到不了**。
+            n_up = rec["up_pity"] + 1
+            n_ssr = rec["ssr_pity"] + 1
+            if n_up >= 140:                                 # 硬保底: 必出当期 UP
+                rid = ups[0] if ups else random.choice(std_ssr)
+            elif n_ssr >= 70:                               # 软保底: UP 或常驻
+                rid = (random.choice(ups) if (ups and random.random() < 0.5)
+                       else random.choice(std_ssr))
+            elif random.random() < SSR_RATE:                # 自然出 SSR
+                rid = (random.choice(ups) if (ups and random.random() < 0.5)
+                       else random.choice(std_ssr))
             else:
                 rid = random.choice(non_ssr)
-            rec["up_pity"] = 0 if cfgdata.role_star(rid) >= SSR_STAR else n
+            is_ssr = cfgdata.role_star(rid) >= SSR_STAR
+            is_up = rid in ups
+            rec["up_pity"] = 0 if is_up else n_up
+            rec["ssr_pity"] = 0 if is_ssr else n_ssr
         else:
             n = rec["normal_pity"] + 1
             if n >= 70:
@@ -3045,8 +3210,11 @@ def _ensure_shop_currency(d):
 #   客户端**在收到第一份完整 `ItemList` 之前会先把它们显示出来** ——
 #   两边对不上时玩家会看到"顶栏数字突然跳一下"
 #   （实测: 格 10000 -> 1000000，用户报「因和稀因变动会导致格的错误变动」）。
-#   统一成 10000 就永远不会跳。★ 同 `baseline.json` 的 save.items。
-CURRENCY_SEED = {1: 10000, 2: 10000, 3: 10000}
+#   ★★ 2026-10-18 用户改口: 三种货币统一 **1,000,000**（基准档一起）。
+#      关键不是数字大小，而是**三边必须一致**：
+#        baseline.json 的 `_options` / `save.items[1..3]` / 这里的 CURRENCY_SEED。
+#      只改一两处就会出现"日志说 10000、顶栏显示 100 万"那种错乱。
+CURRENCY_SEED = {1: 1000000, 2: 1000000, 3: 1000000}
 
 
 def _seed_currency_items(d):
@@ -6456,12 +6624,21 @@ def reset_to_baseline():
             pass
 
     # --- 数量覆盖 ---
+    # ★★★ 2026-10-18 修「马缇长街的货币工作不正常」：
+    #   顶栏三个货币读的是 **items[1/2/3]**（稀因/格/因），而 `load()` 末尾的
+    #   `ACTOR_CURRENCY_MIRROR` 又会把 actor 再镜像成 items。
+    #   以前这里**只写 actor** ⇒ `_options` 里的数值当场被基准档 items 的旧值覆盖
+    #   （基准档 items[2]=1000000、_options.gold=10000 ⇒ 重置后顶栏是 100 万，
+    #     日志却打 10000）。
+    #   ⇒ 三币必须**同时**写 actor 和 items。
     a = new.setdefault("actor", {})
-    for key in ("diamond", "gold", "copper"):
-        if opts.get(key) is not None:
-            a[key] = int(opts[key])
-    n = int(opts.get("item_count") or 0)
     items = new.setdefault("items", {})
+    for key, iid in ACTOR_CURRENCY_MIRROR:
+        if opts.get(key) is not None:
+            v = int(opts[key])
+            a[key] = v
+            items[str(iid)] = v
+    n = int(opts.get("item_count") or 0)
     if n > 0:
         # ★★ 保险: 不可堆叠的道具**绝不能**被盖成大数量。
         #   客户端 logic_store.ChangeData 对 is_stack~=1 && Expired<=0 的物品走
